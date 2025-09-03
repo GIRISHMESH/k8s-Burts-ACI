@@ -33,20 +33,7 @@ metadata:
 data:
   mysql-url: mysql://mysql-0.mysql-headless.nginx-stack.svc.cluster.local:3306
 
-# =========================================================
-# 3️⃣ StorageClass
-# =========================================================
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: mysql-storage
-provisioner: kubernetes.io/azure-disk
-reclaimPolicy: Retain
-allowVolumeExpansion: true
-parameters:
-  skuName: Premium_LRS
-  kind: managed
-volumeBindingMode: WaitForFirstConsumer
+
 
 # =========================================================
 # 4️⃣ MySQL StatefulSet (Worker Node Pool)
@@ -108,10 +95,11 @@ spec:
         name: mysql-data
       spec:
         accessModes: ["ReadWriteOnce"]
-        storageClassName: mysql-storage
+       # Reference cluster-provided StorageClass (e.g., managed-csi in AKS)
+        storageClassName: managed-csi  ####Container Storage Interface
         resources:
           requests:
-            storage: 10Gi
+            storage: 20Gi   # adjust size as per prod needs
 
 # =========================================================
 # 5️⃣ MySQL Services
@@ -609,6 +597,7 @@ spec:
             limits:
               cpu: 200m
               memory: 256Mi
+
 
 
 
