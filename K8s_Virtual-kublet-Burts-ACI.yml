@@ -108,6 +108,7 @@ spec:
         name: mysql-data
       spec:
         accessModes: ["ReadWriteOnce"]
+        storageClassName: mysql-storage
         resources:
           requests:
             storage: 10Gi
@@ -256,8 +257,35 @@ spec:
       targetPort: 80
   type: ClusterIP
 
+
+
+
 # =========================================================
-# 9️⃣ App1 Deployment & Service (Virtual Node Pool)
+# 1️⃣1️⃣ HPA for Nginx Frontend
+# =========================================================
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: nginx-web-hpa
+  namespace: nginx-stack
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: nginx-web
+  minReplicas: 2
+  maxReplicas: 50
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50
+  
+
+# =========================================================
+# 9️⃣ App1 Deployment, Service & HPA (Virtual Node Pool)
 # =========================================================
 apiVersion: apps/v1
 kind: Deployment
@@ -301,9 +329,29 @@ spec:
     - port: 80
       targetPort: 5678
   type: ClusterIP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: app1-hpa
+  namespace: nginx-stack
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: app1
+  minReplicas: 2
+  maxReplicas: 50
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50
 
 # =========================================================
-# 🔟 App2 Deployment & Service (Virtual Node Pool)
+# 🔟 App2 Deployment, Service & HPA (Virtual Node Pool)
 # =========================================================
 apiVersion: apps/v1
 kind: Deployment
@@ -347,3 +395,25 @@ spec:
     - port: 80
       targetPort: 5678
   type: ClusterIP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: app2-hpa
+  namespace: nginx-stack
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: app2
+  minReplicas: 2
+  maxReplicas: 50
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50
+
+
