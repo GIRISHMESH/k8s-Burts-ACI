@@ -34,6 +34,18 @@ data:
   mysql-url: mysql://mysql-0.mysql-headless.nginx-stack.svc.cluster.local:3306
 
 
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: custom-premium-disk
+provisioner: disk.csi.azure.com   # CSI driver for Azure Disks
+parameters:
+  skuName: Premium_LRS            # Options: StandardSSD_LRS, Premium_LRS, Standard_LRS
+  storageaccounttype: Premium_LRS # legacy param (some drivers still require)
+  kind: Managed
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
 
 # =========================================================
 # 4️⃣ MySQL StatefulSet (Worker Node Pool)
@@ -90,16 +102,27 @@ spec:
           volumeMounts:
             - name: mysql-data
               mountPath: /bitnami/mysql
+
   volumeClaimTemplates:
-    - metadata:
-        name: mysql-data
-      spec:
-        accessModes: ["ReadWriteOnce"]
+  - metadata:
+      name: mysql-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: custom-premium-disk   # <-- your custom SC
+      resources:
+        requests:
+          storage: 20Gi
+
+ ## volumeClaimTemplates:
+ ##   - metadata:
+  ##      name: mysql-data
+  ##    spec:
+ ##       accessModes: ["ReadWriteOnce"]
        # Reference cluster-provided StorageClass (e.g., managed-csi in AKS)
-        storageClassName: managed-csi  ####Container Storage Interface using  <-- AKS default disk SC or instead of managed-csi storageClassName: managed-premium  
-        resources:
-          requests:
-            storage: 20Gi   # adjust size as per prod needs
+  ##      storageClassName: managed-csi  ####Container Storage Interface using  <-- AKS default disk SC or instead of managed-csi storageClassName: managed-premium  
+  ##      resources:
+ ##         requests:
+  ##          storage: 20Gi   # adjust size as per prod needs
 
 # =========================================================
 # 5️⃣ MySQL Services
@@ -597,6 +620,7 @@ spec:
             limits:
               cpu: 200m
               memory: 256Mi
+
 
 
 
