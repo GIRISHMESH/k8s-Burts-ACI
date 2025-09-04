@@ -105,7 +105,7 @@ spec:
             - name: mysql-data
               mountPath: /bitnami/mysql
 
-  volumeClaimTemplates:
+  volumeClaimTemplates:   #######PVC request embedded inside the StatefulSet
   - metadata:
       name: mysql-data
     spec:
@@ -622,6 +622,7 @@ spec:
             limits:
               cpu: 200m
               memory: 256Mi
+
 
 
 
