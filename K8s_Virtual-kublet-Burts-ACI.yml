@@ -215,7 +215,7 @@ spec:
     - Ingress
 
 # =========================================================
-# 7️⃣ MySQL Init Job
+# 7️⃣ MySQL Init Job (Fixed)
 # =========================================================
 apiVersion: batch/v1
 kind: Job
@@ -225,9 +225,20 @@ metadata:
 spec:
   template:
     spec:
+      restartPolicy: OnFailure
       containers:
-        - name: mysql-init
+        - name: mysql
           image: bitnami/mysql:8.0
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "1"
+              memory: "2Gi"
+          ports:
+            - containerPort: 3306
+              name: mysql
           env:
             - name: MYSQL_ROOT_PASSWORD
               valueFrom:
@@ -244,7 +255,8 @@ spec:
               mysql -h mysql-headless.nginx-stack.svc.cluster.local \
                     -u root -p"$MYSQL_ROOT_PASSWORD" \
                     -e "CREATE DATABASE IF NOT EXISTS appdb;"
-      restartPolicy: OnFailure
+
+     
 
 # =========================================================
 # 8️⃣ Nginx Deployment & Service (Virtual Node Pool)
@@ -656,6 +668,7 @@ spec:
             limits:
               cpu: 200m
               memory: 256Mi
+
 
 
 
