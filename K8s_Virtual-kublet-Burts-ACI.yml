@@ -68,24 +68,41 @@ spec:
       labels:
         app: mysql
     spec:
-       template:
-    metadata:
-      labels:
-        app: mysql
-    spec:
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
               - matchExpressions:
+                  # Must be Linux
                   - key: kubernetes.io/os
                     operator: In
-                    values:
-                      - linux
+                    values: ["linux"]
+                  # Must be in the new worker node pool
                   - key: agentpool
                     operator: In
-                    values:
-                      - systemnodepool
+                    values: ["workernp"]    ######Pool Name
+          preferredDuringSchedulingIgnoredDuringExecution:
+            # Soft preference: spread across zones (optional)
+            - weight: 50
+              preference:
+                matchExpressions:
+                  - key: topology.kubernetes.io/zone
+                    operator: In
+                    values: ["1","2","3"]
+            # Soft preference: nodes labeled role=db (optional)
+            - weight: 30
+              preference:
+                matchExpressions:
+                  - key: role
+                    operator: In
+                    values: ["db"]
+      # If you TAINTED the pool, add this toleration
+      # tolerations:
+      #   - key: "db"
+      #     operator: "Equal"
+      #     value: "true"
+      #     effect: "NoSchedule"
+
       containers:
         - name: mysql
           image: bitnami/mysql:8.0
@@ -119,6 +136,7 @@ spec:
           volumeMounts:
             - name: mysql-data
               mountPath: /bitnami/mysql
+
 
 
   volumeClaimTemplates:   #######PVC request embedded inside the StatefulSet
@@ -638,6 +656,7 @@ spec:
             limits:
               cpu: 200m
               memory: 256Mi
+
 
 
 
