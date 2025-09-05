@@ -225,7 +225,7 @@ metadata:
 spec:
   template:
     spec:
-      restartPolicy: OnFailure
+      restartPolicy: OnFailure  ###When  Failure then restart
       containers:
         - name: mysql
           image: bitnami/mysql:8.0
@@ -668,6 +668,7 @@ spec:
             limits:
               cpu: 200m
               memory: 256Mi
+
 
 
 
