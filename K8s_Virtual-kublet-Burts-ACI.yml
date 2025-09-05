@@ -68,9 +68,24 @@ spec:
       labels:
         app: mysql
     spec:
-      nodeSelector:
-        kubernetes.io/os: linux
-        agentpool: systemnodepool   # ensure MySQL runs on worker nodes
+       template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/os
+                    operator: In
+                    values:
+                      - linux
+                  - key: agentpool
+                    operator: In
+                    values:
+                      - systemnodepool
       containers:
         - name: mysql
           image: bitnami/mysql:8.0
@@ -104,6 +119,7 @@ spec:
           volumeMounts:
             - name: mysql-data
               mountPath: /bitnami/mysql
+
 
   volumeClaimTemplates:   #######PVC request embedded inside the StatefulSet
   - metadata:
@@ -622,6 +638,7 @@ spec:
             limits:
               cpu: 200m
               memory: 256Mi
+
 
 
 
