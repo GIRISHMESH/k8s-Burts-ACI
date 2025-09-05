@@ -299,7 +299,7 @@ spec:
             - /opt/bitnami/scripts/mysql/wait-for-mysql.sh
       containers:
         - name: nginx
-          image: nginx:latest
+          image: acrforaksdemo2.azurecr.io/app1/kube-nginx-acr:v1   #Use ACR image references in Deployments  or  use  nginx:latest  from nginx  repository
           ports:
             - containerPort: 80
 ---
@@ -366,7 +366,7 @@ spec:
         effect: NoSchedule
       containers:
         - name: app1
-          image: hashicorp/http-echo
+          image: acrforaksdemo2.azurecr.io/app1/http-echo:v1  #####Use ACR image references in Deployments or  from hashicorp/http-echo
           args: ["-text=Hello from App1"]
           ports:
             - containerPort: 5678
@@ -432,7 +432,7 @@ spec:
         effect: NoSchedule
       containers:
         - name: app2
-          image: hashicorp/http-echo
+          image: acrforaksdemo2.azurecr.io/app1/http-echo:v1          ######Use ACR image references in Deployments  or   hashicorp/http-echo
           args: ["-text=Hello from App2"]
           ports:
             - containerPort: 5678
@@ -663,6 +663,7 @@ spec:
             limits:
               cpu: 200m
               memory: 256Mi
+
 
 
 
