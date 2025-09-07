@@ -19,17 +19,24 @@ stages:
           command: buildAndPush
           repository: $(IMAGE_NAME)
           dockerfile: Dockerfile
-          containerRegistry: $(ACR_SERVICE_CONNECTION)   # <-- service connection in DevOps
+          containerRegistry: $(ACR_SERVICE_CONNECTION)   # <-- Service connection to ACR
           tags: |
             $(IMAGE_TAG)
 
+- stage: Deploy
+  jobs:
+  - job: DeployToAKS
+    pool:
+      vmImage: ubuntu-latest
+    steps:
       - task: KubernetesManifest@1
         displayName: Deploy to AKS
         inputs:
           action: deploy
-          kubernetesServiceConnection: $(AKS_SERVICE_CONNECTION)  # <-- AKS service connection
+          kubernetesServiceConnection: $(AKS_SERVICE_CONNECTION)  # <-- Service connection to AKS
           namespace: nginx-stack
           manifests: |
             k8s-manifests/*.yaml
           containers: |
             $(ACR_NAME).azurecr.io/$(IMAGE_NAME):$(IMAGE_TAG)
+
