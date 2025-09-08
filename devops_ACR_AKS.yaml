@@ -33,10 +33,14 @@ stages:
         displayName: Deploy to AKS
         inputs:
           action: deploy
-          kubernetesServiceConnection: $(AKS_SERVICE_CONNECTION)  # <-- Service connection to AKS
+          kubernetesServiceConnection: $(AKS_SERVICE_CONNECTION)
           namespace: nginx-stack
           manifests: |
             k8s-manifests/*.yaml
           containers: |
             $(ACR_NAME).azurecr.io/$(IMAGE_NAME):$(IMAGE_TAG)
+          imagePullSecrets: |
+            $(imagePullSecret)
+
+
 
