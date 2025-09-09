@@ -12,7 +12,7 @@ metadata:
   name: ingress-nginx
 
 # =========================================================
-# 2️⃣ Secrets & ConfigMaps (Tokenized / Key Vault Ready)
+# 2️⃣ Secrets & ConfigMaps
 # =========================================================
 apiVersion: v1
 kind: Secret
@@ -202,70 +202,7 @@ spec:
     - Ingress
 
 # =========================================================
-# 7️⃣ MySQL Init Job
-# =========================================================
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: nginx-web
-  namespace: __NAMESPACE__
-spec:
-  replicas: __NGINX_REPLICAS__
-  selector:
-    matchLabels:
-      app: nginx-web
-  template:
-    metadata:
-      labels:
-        app: nginx-web
-    spec:
-      nodeSelector:
-        kubernetes.io/os: linux
-        type: virtual-kubelet
-      tolerations:
-        - key: virtual-kubelet.io/provider
-          operator: Exists
-        - key: azure.com/aci
-          effect: NoSchedule
-      initContainers:
-        - name: wait-for-mysql
-          image: bitnami/mysql:8.0
-          env:
-            - name: MYSQL_ROOT_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: mysql-secret
-                  key: root-password
-          command: ["sh","-c","/opt/bitnami/scripts/mysql/wait-for-mysql.sh"]
-      imagePullSecrets:
-        - name: acr-pull-secret
-      containers:
-        - name: nginx
-          image: __ACR_NAME__.azurecr.io/nginx-web:__IMAGE_TAG__
-          ports:
-            - containerPort: 80
-          resources:
-            requests:
-              cpu: 250m
-              memory: 256Mi
-            limits:
-              cpu: 500m
-              memory: 512Mi
-          readinessProbe:
-            httpGet:
-              path: /
-              port: 80
-            initialDelaySeconds: 15
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /
-              port: 80
-            initialDelaySeconds: 30
-            periodSeconds: 15
-
-# =========================================================
-# 8️⃣ Nginx Deployment, Service & HPA
+# 7️⃣ Nginx Deployment, Service & HPA
 # =========================================================
 apiVersion: apps/v1
 kind: Deployment
@@ -350,7 +287,7 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: nginx-web
-  minReplicas: __NGINX_REPLICAS__
+  minReplicas: __NGINX_MIN_REPLICAS__
   maxReplicas: __NGINX_MAX_REPLICAS__
   metrics:
     - type: Resource
@@ -361,7 +298,7 @@ spec:
           averageUtilization: 70
 
 # =========================================================
-# 9️⃣ App1 Deployment, Service & HPA
+# 8️⃣ App1 Deployment, Service & HPA
 # =========================================================
 apiVersion: apps/v1
 kind: Deployment
@@ -386,6 +323,16 @@ spec:
           operator: Exists
         - key: azure.com/aci
           effect: NoSchedule
+      initContainers:
+        - name: wait-for-mysql
+          image: bitnami/mysql:8.0
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: root-password
+          command: ["sh","-c","/opt/bitnami/scripts/mysql/wait-for-mysql.sh"]
       imagePullSecrets:
         - name: acr-pull-secret
       containers:
@@ -437,7 +384,7 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: app1
-  minReplicas: __APP1_REPLICAS__
+  minReplicas: __APP1_MIN_REPLICAS__
   maxReplicas: __APP1_MAX_REPLICAS__
   metrics:
     - type: Resource
@@ -448,7 +395,7 @@ spec:
           averageUtilization: 70
 
 # =========================================================
-# 🔟 App2 Deployment, Service & HPA
+# 9️⃣ App2 Deployment, Service & HPA
 # =========================================================
 apiVersion: apps/v1
 kind: Deployment
@@ -473,6 +420,16 @@ spec:
           operator: Exists
         - key: azure.com/aci
           effect: NoSchedule
+      initContainers:
+        - name: wait-for-mysql
+          image: bitnami/mysql:8.0
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: root-password
+          command: ["sh","-c","/opt/bitnami/scripts/mysql/wait-for-mysql.sh"]
       imagePullSecrets:
         - name: acr-pull-secret
       containers:
@@ -524,7 +481,7 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: app2
-  minReplicas: __APP2_REPLICAS__
+  minReplicas: __APP2_MIN_REPLICAS__
   maxReplicas: __APP2_MAX_REPLICAS__
   metrics:
     - type: Resource
@@ -535,7 +492,7 @@ spec:
           averageUtilization: 70
 
 # =========================================================
-# 1️⃣1️⃣ Ingress Controller
+# 🔟 Ingress Controller
 # =========================================================
 apiVersion: apps/v1
 kind: Deployment
@@ -598,7 +555,7 @@ spec:
   controller: k8s.io/ingress-nginx
 
 # =========================================================
-# 1️⃣2️⃣ Ingress Resource
+# 1️⃣1️⃣ Ingress Resource
 # =========================================================
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -607,6 +564,8 @@ metadata:
   namespace: __NAMESPACE__
   annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /
 spec:
   ingressClassName: nginx
   tls:
@@ -648,7 +607,7 @@ spec:
                   number: 80
 
 # =========================================================
-# 1️⃣3️⃣ ExternalDNS with Workload Identity (OIDC)
+# 1️⃣2️⃣ ExternalDNS with Workload Identity (OIDC)
 # =========================================================
 apiVersion: v1
 kind: ServiceAccount
@@ -721,4 +680,3 @@ spec:
             limits:
               cpu: 200m
               memory: 256Mi
-
