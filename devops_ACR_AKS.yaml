@@ -1,46 +1,139 @@
 trigger:
-  - main
+- master
 
 variables:
   ACR_NAME: acrforaksdemo2
-  IMAGE_NAME: app1/kube-nginx-acr
-  IMAGE_TAG: $(Build.BuildId)   # auto-generated unique tag
+  IMAGE_TAG: '$(Build.BuildId)'   # unique tag per build
+  ACR_SERVICE_CONNECTION: manual-aksdevopsacr-svc
+  AKS_SERVICE_CONNECTION: my-azure-subscription
+  RESOURCE_GROUP: my-rg
+  AKS_CLUSTER: my-aks
+  NAMESPACE: nginx-stack
 
 stages:
+
+# ------------------------
+# Stage 1: CI - Build Docker Images + Publish Manifests
+# ------------------------
 - stage: Build
+  displayName: CI Stage - Build & Publish
   jobs:
   - job: BuildAndPush
+    displayName: Build and Push Docker Images
     pool:
-      vmImage: ubuntu-latest
+      vmImage: 'ubuntu-latest'
     steps:
-      - task: Docker@2
-        displayName: Build and Push Docker Image
-        inputs:
-          command: buildAndPush
-          repository: $(IMAGE_NAME)
-          dockerfile: Dockerfile
-          containerRegistry: $(ACR_SERVICE_CONNECTION)   # <-- Service connection to ACR
-          tags: |
-            $(IMAGE_TAG)
 
+    # Checkout repo
+    - checkout: self
+
+    # Build & push nginx-web image
+    - task: Docker@2
+      displayName: Build & Push nginx-web Image
+      inputs:
+        containerRegistry: $(ACR_SERVICE_CONNECTION)
+        repository: $(ACR_NAME)/nginx-web
+        command: buildAndPush
+        Dockerfile: 'src/nginx/Dockerfile'
+        tags: |
+          $(IMAGE_TAG)
+
+    # Build & push app1 image
+    - task: Docker@2
+      displayName: Build & Push app1 Image
+      inputs:
+        containerRegistry: $(ACR_SERVICE_CONNECTION)
+        repository: $(ACR_NAME)/app1
+        command: buildAndPush
+        Dockerfile: 'src/app1/Dockerfile'
+        tags: |
+          $(IMAGE_TAG)
+
+    # Build & push app2 image
+    - task: Docker@2
+      displayName: Build & Push app2 Image
+      inputs:
+        containerRegistry: $(ACR_SERVICE_CONNECTION)
+        repository: $(ACR_NAME)/app2
+        command: buildAndPush
+        Dockerfile: 'src/app2/Dockerfile'
+        tags: |
+          $(IMAGE_TAG)
+
+    # Copy Kubernetes manifests to artifact staging
+    - task: CopyFiles@2
+      displayName: Copy Kube Manifests
+      inputs:
+        SourceFolder: '$(System.DefaultWorkingDirectory)/kube-manifests'
+        Contents: '**'
+        TargetFolder: '$(Build.ArtifactStagingDirectory)/kube-manifests'
+        OverWrite: true
+
+    # Publish manifests as pipeline artifact
+    - publish: '$(Build.ArtifactStagingDirectory)/kube-manifests'
+      artifact: kube-manifests
+      displayName: Publish Kube Manifests Artifact
+
+# ------------------------
+# Stage 2: CD - Deploy to AKS
+# ------------------------
 - stage: Deploy
+  displayName: CD Stage - Deploy to AKS
+  dependsOn: Build
   jobs:
-  - job: DeployToAKS
+  - deployment: DeployToAKS
+    displayName: Deploy Applications to AKS
+    environment: aks-dev
     pool:
-      vmImage: ubuntu-latest
-    steps:
-      - task: KubernetesManifest@1
-        displayName: Deploy to AKS
-        inputs:
-          action: deploy
-          kubernetesServiceConnection: $(AKS_SERVICE_CONNECTION)
-          namespace: nginx-stack
-          manifests: |
-            k8s-manifests/*.yaml
-          containers: |
-            $(ACR_NAME).azurecr.io/$(IMAGE_NAME):$(IMAGE_TAG)
-          imagePullSecrets: |
-            $(imagePullSecret)
+      vmImage: 'ubuntu-latest'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
 
+          # Download manifests artifact from CI
+          - download: current
+            artifact: kube-manifests
 
+          # Patch deployment.yaml for nginx-web
+          - task: FileTransform@2
+            displayName: Patch nginx-web Deployment
+            inputs:
+              folderPath: '$(Pipeline.Workspace)/kube-manifests'
+              targetFiles: 'nginx-web-deployment.yaml'
+              tokenPattern: 'IMAGE_TAG'
+              replacementValues: |
+                IMAGE_TAG=$(IMAGE_TAG)
 
+          # Patch deployment.yaml for app1
+          - task: FileTransform@2
+            displayName: Patch app1 Deployment
+            inputs:
+              folderPath: '$(Pipeline.Workspace)/kube-manifests'
+              targetFiles: 'app1-deployment.yaml'
+              tokenPattern: 'IMAGE_TAG'
+              replacementValues: |
+                IMAGE_TAG=$(IMAGE_TAG)
+
+          # Patch deployment.yaml for app2
+          - task: FileTransform@2
+            displayName: Patch app2 Deployment
+            inputs:
+              folderPath: '$(Pipeline.Workspace)/kube-manifests'
+              targetFiles: 'app2-deployment.yaml'
+              tokenPattern: 'IMAGE_TAG'
+              replacementValues: |
+                IMAGE_TAG=$(IMAGE_TAG)
+
+          # Deploy patched manifests to AKS
+          - task: Kubectl@1
+            displayName: Deploy All Applications to AKS
+            inputs:
+              connectionType: 'Azure Resource Manager'
+              azureSubscription: $(AKS_SERVICE_CONNECTION)
+              azureResourceGroup: $(RESOURCE_GROUP)
+              kubernetesCluster: $(AKS_CLUSTER)
+              namespace: $(NAMESPACE)
+              command: apply
+              useConfigurationFile: true
+              configuration: '$(Pipeline.Workspace)/kube-manifests/*.yaml'
