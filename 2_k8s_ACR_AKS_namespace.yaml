@@ -1,5 +1,228 @@
 # =========================================================
-# 7️⃣ Nginx Deployment, Service & HPA (Updated)
+# 1️⃣ Namespaces
+# =========================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: __NAMESPACE__
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ingress-nginx
+
+# =========================================================
+# 2️⃣ Secrets & ConfigMaps (Tokenized / Key Vault Ready)
+# =========================================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mysql-secret
+  namespace: __NAMESPACE__
+type: Opaque
+stringData:
+  root-password: __MYSQL_ROOT_PASSWORD__
+  repl-password: __MYSQL_REPL_PASSWORD__
+  app-password: __MYSQL_APP_PASSWORD__
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-config
+  namespace: __NAMESPACE__
+data:
+  mysql-url: mysql://mysql-0.mysql-headless.__NAMESPACE__.svc.cluster.local:3306
+
+# =========================================================
+# 3️⃣ StorageClass
+# =========================================================
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: __MYSQL_STORAGECLASS__
+provisioner: disk.csi.azure.com
+parameters:
+  skuName: Premium_LRS
+  storageaccounttype: Premium_LRS
+  kind: Managed
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+
+# =========================================================
+# 4️⃣ MySQL StatefulSet
+# =========================================================
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+  namespace: __NAMESPACE__
+spec:
+  serviceName: mysql-headless
+  replicas: __MYSQL_REPLICAS__
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/os
+                    operator: In
+                    values: ["linux"]
+                  - key: agentpool
+                    operator: In
+                    values: ["__MYSQL_NODEPOOL__"]
+      containers:
+        - name: mysql
+          image: bitnami/mysql:8.0
+          ports:
+            - containerPort: 3306
+              name: mysql
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: root-password
+            - name: MYSQL_REPLICATION_MODE
+              value: "master"
+            - name: MYSQL_REPLICATION_USER
+              value: repl_user
+            - name: MYSQL_REPLICATION_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: repl-password
+            - name: MYSQL_DATABASE
+              value: appdb
+            - name: MYSQL_USER
+              value: appuser
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: app-password
+          volumeMounts:
+            - name: mysql-data
+              mountPath: /bitnami/mysql
+  volumeClaimTemplates:
+    - metadata:
+        name: mysql-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: __MYSQL_STORAGECLASS__
+        resources:
+          requests:
+            storage: __MYSQL_STORAGE__
+
+# =========================================================
+# 5️⃣ MySQL Services
+# =========================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-headless
+  namespace: __NAMESPACE__
+spec:
+  clusterIP: None
+  selector:
+    app: mysql
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: mysql
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  namespace: __NAMESPACE__
+spec:
+  type: ClusterIP
+  selector:
+    app: mysql
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: mysql
+
+# =========================================================
+# 6️⃣ NetworkPolicy
+# =========================================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-nginx-to-mysql
+  namespace: __NAMESPACE__
+spec:
+  podSelector:
+    matchLabels:
+      app: mysql
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: nginx-web
+        - podSelector:
+            matchLabels:
+              app: app1
+        - podSelector:
+            matchLabels:
+              app: app2
+      ports:
+        - protocol: TCP
+          port: 3306
+  policyTypes:
+    - Ingress
+
+# =========================================================
+# 7️⃣ MySQL Init Job
+# =========================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: init-mysql
+  namespace: __NAMESPACE__
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mysql
+          image: bitnami/mysql:8.0
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "1"
+              memory: "2Gi"
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: root-password
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for MySQL cluster..."
+              /opt/bitnami/scripts/mysql/wait-for-mysql.sh
+              echo "Creating DB..."
+              mysql -h mysql-headless.__NAMESPACE__.svc.cluster.local \
+                    -u root -p"$MYSQL_ROOT_PASSWORD" \
+                    -e "CREATE DATABASE IF NOT EXISTS appdb;"
+
+# =========================================================
+# 8️⃣ Nginx Deployment, Service & HPA
 # =========================================================
 apiVersion: apps/v1
 kind: Deployment
@@ -60,9 +283,42 @@ spec:
               port: 80
             initialDelaySeconds: 30
             periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-web
+  namespace: __NAMESPACE__
+spec:
+  selector:
+    app: nginx-web
+  ports:
+    - port: 80
+      targetPort: 80
+  type: ClusterIP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: nginx-web-hpa
+  namespace: __NAMESPACE__
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: nginx-web
+  minReplicas: __NGINX_REPLICAS__
+  maxReplicas: __NGINX_MAX_REPLICAS__
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
 
 # =========================================================
-# 8️⃣ App1 Deployment, Service & HPA (Updated)
+# 9️⃣ App1 Deployment, Service & HPA
 # =========================================================
 apiVersion: apps/v1
 kind: Deployment
@@ -114,9 +370,42 @@ spec:
               port: 5678
             initialDelaySeconds: 15
             periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app1
+  namespace: __NAMESPACE__
+spec:
+  selector:
+    app: app1
+  ports:
+    - port: 80
+      targetPort: 5678
+  type: ClusterIP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: app1-hpa
+  namespace: __NAMESPACE__
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: app1
+  minReplicas: __APP1_REPLICAS__
+  maxReplicas: __APP1_MAX_REPLICAS__
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
 
 # =========================================================
-# 9️⃣ App2 Deployment, Service & HPA (Updated)
+# 🔟 App2 Deployment, Service & HPA
 # =========================================================
 apiVersion: apps/v1
 kind: Deployment
@@ -168,3 +457,224 @@ spec:
               port: 5678
             initialDelaySeconds: 15
             periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app2
+  namespace: __NAMESPACE__
+spec:
+  selector:
+    app: app2
+  ports:
+    - port: 80
+      targetPort: 5678
+  type: ClusterIP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: app2-hpa
+  namespace: __NAMESPACE__
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: app2
+  minReplicas: __APP2_REPLICAS__
+  maxReplicas: __APP2_MAX_REPLICAS__
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+# =========================================================
+# 1️⃣1️⃣ Ingress Controller
+# =========================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingress-nginx-controller
+  namespace: ingress-nginx
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ingress-nginx
+      app.kubernetes.io/component: controller
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ingress-nginx
+        app.kubernetes.io/component: controller
+    spec:
+      containers:
+        - name: controller
+          image: registry.k8s.io/ingress-nginx/controller:v1.10.0
+          args:
+            - --controller-class=k8s.io/ingress-nginx
+            - --publish-service=$(POD_NAMESPACE)/ingress-nginx-controller
+            - --election-id=ingress-controller-leader
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          ports:
+            - name: http
+              containerPort: 80
+            - name: https
+              containerPort: 443
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ingress-nginx-controller
+  namespace: ingress-nginx
+spec:
+  type: LoadBalancer
+  loadBalancerIP: <STATIC_IP>
+  selector:
+    app.kubernetes.io/component: controller
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+    - name: https
+      port: 443
+      targetPort: 443
+---
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: nginx
+spec:
+  controller: k8s.io/ingress-nginx
+
+# =========================================================
+# 1️⃣2️⃣ Ingress Resource
+# =========================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nginx-stack-ingress
+  namespace: __NAMESPACE__
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - __WEB_HOST__
+        - __APP1_HOST__
+        - __APP2_HOST__
+      secretName: nginx-tls-secret
+  rules:
+    - host: __WEB_HOST__
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nginx-web
+                port:
+                  number: 80
+    - host: __APP1_HOST__
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: app1
+                port:
+                  number: 80
+    - host: __APP2_HOST__
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: app2
+                port:
+                  number: 80
+
+# =========================================================
+# 1️⃣3️⃣ ExternalDNS with Workload Identity (OIDC)
+# =========================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: external-dns
+  namespace: __NAMESPACE__
+  annotations:
+    azure.workload.identity/client-id: <UAMI_CLIENT_ID>
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: external-dns
+rules:
+  - apiGroups: [""]
+    resources: ["services","endpoints","pods","nodes"]
+    verbs: ["get","watch","list"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get","watch","list"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create","patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: external-dns-viewer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: external-dns
+subjects:
+  - kind: ServiceAccount
+    name: external-dns
+    namespace: __NAMESPACE__
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: external-dns
+  namespace: __NAMESPACE__
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: external-dns
+  template:
+    metadata:
+      labels:
+        app: external-dns
+    spec:
+      serviceAccountName: external-dns
+      containers:
+        - name: external-dns
+          image: registry.k8s.io/external-dns/external-dns:v0.14.1
+          args:
+            - --source=service
+            - --source=ingress
+            - --domain-filter=__DOMAIN__
+            - --provider=azure
+            - --azure-resource-group=__DNS_RG_NAME__
+            - --azure-subscription-id=__SUBSCRIPTION_ID__
+            - --azure-user-assigned-identity-client-id=__UAMI_CLIENT_ID__
+            - --log-level=debug
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
