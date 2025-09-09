@@ -94,6 +94,8 @@ stages:
   - deployment: Dev
     displayName: Deploy to DEV
     environment: aks-dev
+    variables:
+    - group: mysql-secrets-dev   # 👈 loads secrets for Dev
     pool:
       vmImage: 'ubuntu-latest'
     strategy:
@@ -140,6 +142,9 @@ stages:
   - deployment: QA
     displayName: Deploy to QA
     environment: aks-qa
+    variables:
+    - group: mysql-secrets-qa
+
     pool:
       vmImage: 'ubuntu-latest'
     strategy:
@@ -192,6 +197,9 @@ stages:
   - deployment: Staging
     displayName: Deploy to Staging
     environment: aks-staging
+    variables:
+    - group: mysql-secrets-staging
+
     pool:
       vmImage: 'ubuntu-latest'
     strategy:
@@ -237,5 +245,6 @@ stages:
                 command: apply
                 useConfigurationFile: true
                 configuration: '$(Pipeline.Workspace)/kube-manifests/*.yaml'
+
 
 
