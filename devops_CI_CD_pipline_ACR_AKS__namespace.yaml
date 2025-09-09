@@ -1,0 +1,236 @@
+trigger:
+- master
+
+variables:
+  # Shared variables
+  ACR_NAME: acrforaksdemo2
+  IMAGE_TAG: '$(Build.BuildId)'
+  ACR_SERVICE_CONNECTION: manual-aksdevopsacr-svc
+  AKS_SERVICE_CONNECTION: my-azure-subscription
+  RESOURCE_GROUP: my-rg
+  AKS_CLUSTER: my-aks
+  MYSQL_REPLICAS: 3
+  MYSQL_NODEPOOL: workernp
+  MYSQL_STORAGECLASS: custom-premium-disk
+  MYSQL_STORAGE: 20Gi
+  STATIC_IP: <STATIC_IP_VALUE>
+  WEB_HOST: web.yourdomain.com
+  APP1_HOST: app1.yourdomain.com
+  APP2_HOST: app2.yourdomain.com
+
+stages:
+# =========================================================
+# Stage 1: CI - Build Docker Images + Publish Manifests
+# =========================================================
+- stage: Build
+  displayName: CI Stage - Build & Publish
+  jobs:
+  - job: BuildAndPush
+    displayName: Build and Push Docker Images
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+      - checkout: self
+
+      # Build & push images
+      - task: Docker@2
+        displayName: Build & Push nginx-web Image
+        inputs:
+          containerRegistry: $(ACR_SERVICE_CONNECTION)
+          repository: $(ACR_NAME)/nginx-web
+          command: buildAndPush
+          Dockerfile: 'src/nginx/Dockerfile'
+          tags: |
+            $(IMAGE_TAG)
+
+      - task: Docker@2
+        displayName: Build & Push app1 Image
+        inputs:
+          containerRegistry: $(ACR_SERVICE_CONNECTION)
+          repository: $(ACR_NAME)/app1
+          command: buildAndPush
+          Dockerfile: 'src/app1/Dockerfile'
+          tags: |
+            $(IMAGE_TAG)
+
+      - task: Docker@2
+        displayName: Build & Push app2 Image
+        inputs:
+          containerRegistry: $(ACR_SERVICE_CONNECTION)
+          repository: $(ACR_NAME)/app2
+          command: buildAndPush
+          Dockerfile: 'src/app2/Dockerfile'
+          tags: |
+            $(IMAGE_TAG)
+
+      # Copy Kubernetes manifests
+      - task: CopyFiles@2
+        displayName: Copy Kube Manifests
+        inputs:
+          SourceFolder: '$(System.DefaultWorkingDirectory)/kube-manifests'
+          Contents: '**'
+          TargetFolder: '$(Build.ArtifactStagingDirectory)/kube-manifests'
+          OverWrite: true
+
+      # Publish manifests artifact
+      - publish: '$(Build.ArtifactStagingDirectory)/kube-manifests'
+        artifact: kube-manifests
+        displayName: Publish Kube Manifests Artifact
+
+# =========================================================
+# Stage 2: CD - Deploy to Dev, QA, Staging
+# =========================================================
+- stage: Deploy
+  displayName: CD Stage - Deploy to Environments
+  dependsOn: Build
+  jobs:
+
+    # -------------------
+    # Dev Deployment
+    # -------------------
+  - deployment: Dev
+    displayName: Deploy to DEV
+    environment: aks-dev
+    pool:
+      vmImage: 'ubuntu-latest'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+            - download: current
+              artifact: kube-manifests
+
+            - task: FileTransform@2
+              displayName: Replace Tokens for DEV
+              inputs:
+                folderPath: '$(Pipeline.Workspace)/kube-manifests'
+                targetFiles: '**/*.yaml'
+                tokenPattern: '__[A-Z0-9_]+__'
+                replacementValues: |
+                  IMAGE_TAG=$(IMAGE_TAG)
+                  NAMESPACE=dev-nginx-stack
+                  ACR_NAME=$(ACR_NAME)
+                  STATIC_IP=$(STATIC_IP)
+                  WEB_HOST=$(WEB_HOST)
+                  APP1_HOST=$(APP1_HOST)
+                  APP2_HOST=$(APP2_HOST)
+                  MYSQL_REPLICAS=$(MYSQL_REPLICAS)
+                  MYSQL_NODEPOOL=$(MYSQL_NODEPOOL)
+                  MYSQL_STORAGECLASS=$(MYSQL_STORAGECLASS)
+                  MYSQL_STORAGE=$(MYSQL_STORAGE)
+
+            - task: Kubectl@1
+              displayName: Deploy to DEV AKS
+              inputs:
+                connectionType: 'Azure Resource Manager'
+                azureSubscription: $(AKS_SERVICE_CONNECTION)
+                azureResourceGroup: $(RESOURCE_GROUP)
+                kubernetesCluster: $(AKS_CLUSTER)
+                namespace: dev-nginx-stack
+                command: apply
+                useConfigurationFile: true
+                configuration: '$(Pipeline.Workspace)/kube-manifests/*.yaml'
+
+    # -------------------
+    # QA Deployment (requires approval)
+    # -------------------
+  - deployment: QA
+    displayName: Deploy to QA
+    environment: aks-qa
+    pool:
+      vmImage: 'ubuntu-latest'
+    strategy:
+      runOnce:
+        preDeploy:
+          steps:
+            - task: ManualValidation@0
+              inputs:
+                notifyUsers: 'qa_lead@yourcompany.com'
+                instructions: 'Approve deployment to QA?'
+        deploy:
+          steps:
+            - download: current
+              artifact: kube-manifests
+
+            - task: FileTransform@2
+              displayName: Replace Tokens for QA
+              inputs:
+                folderPath: '$(Pipeline.Workspace)/kube-manifests'
+                targetFiles: '**/*.yaml'
+                tokenPattern: '__[A-Z0-9_]+__'
+                replacementValues: |
+                  IMAGE_TAG=$(IMAGE_TAG)
+                  NAMESPACE=qa-nginx-stack
+                  ACR_NAME=$(ACR_NAME)
+                  STATIC_IP=$(STATIC_IP)
+                  WEB_HOST=$(WEB_HOST)
+                  APP1_HOST=$(APP1_HOST)
+                  APP2_HOST=$(APP2_HOST)
+                  MYSQL_REPLICAS=$(MYSQL_REPLICAS)
+                  MYSQL_NODEPOOL=$(MYSQL_NODEPOOL)
+                  MYSQL_STORAGECLASS=$(MYSQL_STORAGECLASS)
+                  MYSQL_STORAGE=$(MYSQL_STORAGE)
+
+            - task: Kubectl@1
+              displayName: Deploy to QA AKS
+              inputs:
+                connectionType: 'Azure Resource Manager'
+                azureSubscription: $(AKS_SERVICE_CONNECTION)
+                azureResourceGroup: $(RESOURCE_GROUP)
+                kubernetesCluster: $(AKS_CLUSTER)
+                namespace: qa-nginx-stack
+                command: apply
+                useConfigurationFile: true
+                configuration: '$(Pipeline.Workspace)/kube-manifests/*.yaml'
+
+    # -------------------
+    # Staging Deployment (requires approval)
+    # -------------------
+  - deployment: Staging
+    displayName: Deploy to Staging
+    environment: aks-staging
+    pool:
+      vmImage: 'ubuntu-latest'
+    strategy:
+      runOnce:
+        preDeploy:
+          steps:
+            - task: ManualValidation@0
+              inputs:
+                notifyUsers: 'staging_manager@yourcompany.com'
+                instructions: 'Approve deployment to Staging?'
+        deploy:
+          steps:
+            - download: current
+              artifact: kube-manifests
+
+            - task: FileTransform@2
+              displayName: Replace Tokens for Staging
+              inputs:
+                folderPath: '$(Pipeline.Workspace)/kube-manifests'
+                targetFiles: '**/*.yaml'
+                tokenPattern: '__[A-Z0-9_]+__'
+                replacementValues: |
+                  IMAGE_TAG=$(IMAGE_TAG)
+                  NAMESPACE=staging-nginx-stack
+                  ACR_NAME=$(ACR_NAME)
+                  STATIC_IP=$(STATIC_IP)
+                  WEB_HOST=$(WEB_HOST)
+                  APP1_HOST=$(APP1_HOST)
+                  APP2_HOST=$(APP2_HOST)
+                  MYSQL_REPLICAS=$(MYSQL_REPLICAS)
+                  MYSQL_NODEPOOL=$(MYSQL_NODEPOOL)
+                  MYSQL_STORAGECLASS=$(MYSQL_STORAGECLASS)
+                  MYSQL_STORAGE=$(MYSQL_STORAGE)
+
+            - task: Kubectl@1
+              displayName: Deploy to Staging AKS
+              inputs:
+                connectionType: 'Azure Resource Manager'
+                azureSubscription: $(AKS_SERVICE_CONNECTION)
+                azureResourceGroup: $(RESOURCE_GROUP)
+                kubernetesCluster: $(AKS_CLUSTER)
+                namespace: staging-nginx-stack
+                command: apply
+                useConfigurationFile: true
+                configuration: '$(Pipeline.Workspace)/kube-manifests/*.yaml'
