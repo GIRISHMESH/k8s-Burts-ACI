@@ -1,0 +1,383 @@
+# =========================================================
+# 1️⃣ Namespaces
+# =========================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: __NAMESPACE__
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ingress-nginx
+
+# =========================================================
+# 2️⃣ Secrets & ConfigMaps
+# =========================================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mysql-secret
+  namespace: __NAMESPACE__
+type: Opaque
+stringData:
+  root-password: __MYSQL_ROOT_PASSWORD__
+  repl-password: __MYSQL_REPL_PASSWORD__
+  app-password: __MYSQL_APP_PASSWORD__
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-config
+  namespace: __NAMESPACE__
+data:
+  mysql-url: mysql://mysql-0.mysql-headless.__NAMESPACE__.svc.cluster.local:3306
+
+# =========================================================
+# 3️⃣ StorageClass
+# =========================================================
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: __MYSQL_STORAGECLASS__
+provisioner: disk.csi.azure.com
+parameters:
+  skuName: Premium_LRS
+  storageaccounttype: Premium_LRS
+  kind: Managed
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+
+# =========================================================
+# 4️⃣ MySQL StatefulSet
+# =========================================================
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+  namespace: __NAMESPACE__
+spec:
+  serviceName: mysql-headless
+  replicas: __MYSQL_REPLICAS__
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/os
+                    operator: In
+                    values: ["linux"]
+                  - key: agentpool
+                    operator: In
+                    values: ["__MYSQL_NODEPOOL__"]
+      containers:
+        - name: mysql
+          image: bitnami/mysql:8.0
+          ports:
+            - containerPort: 3306
+              name: mysql
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: root-password
+            - name: MYSQL_REPLICATION_MODE
+              value: "master"
+            - name: MYSQL_REPLICATION_USER
+              value: repl_user
+            - name: MYSQL_REPLICATION_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: repl-password
+            - name: MYSQL_DATABASE
+              value: appdb
+            - name: MYSQL_USER
+              value: appuser
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: app-password
+          volumeMounts:
+            - name: mysql-data
+              mountPath: /bitnami/mysql
+  volumeClaimTemplates:
+    - metadata:
+        name: mysql-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: __MYSQL_STORAGECLASS__
+        resources:
+          requests:
+            storage: __MYSQL_STORAGE__
+
+# =========================================================
+# 5️⃣ MySQL Services
+# =========================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-headless
+  namespace: __NAMESPACE__
+spec:
+  clusterIP: None
+  selector:
+    app: mysql
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: mysql
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  namespace: __NAMESPACE__
+spec:
+  type: ClusterIP
+  selector:
+    app: mysql
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: mysql
+
+# =========================================================
+# 6️⃣ NetworkPolicy
+# =========================================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-nginx-to-mysql
+  namespace: __NAMESPACE__
+spec:
+  podSelector:
+    matchLabels:
+      app: mysql
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: nginx-web
+      ports:
+        - protocol: TCP
+          port: 3306
+  policyTypes:
+    - Ingress
+
+# =========================================================
+# 7️⃣ Nginx Deployment & Service
+# =========================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-web
+  namespace: __NAMESPACE__
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx-web
+  template:
+    metadata:
+      labels:
+        app: nginx-web
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+        type: virtual-kubelet
+      tolerations:
+        - key: virtual-kubelet.io/provider
+          operator: Exists
+        - key: azure.com/aci
+          effect: NoSchedule
+      initContainers:
+        - name: wait-for-mysql
+          image: bitnami/mysql:8.0
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: root-password
+          command:
+            - sh
+            - -c
+            - /opt/bitnami/scripts/mysql/wait-for-mysql.sh
+      imagePullSecrets:
+        - name: acr-pull-secret
+      containers:
+        - name: nginx
+          image: __ACR_NAME__.azurecr.io/nginx-web:__IMAGE_TAG__
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-web
+  namespace: __NAMESPACE__
+spec:
+  selector:
+    app: nginx-web
+  ports:
+    - port: 80
+      targetPort: 80
+  type: ClusterIP
+
+# =========================================================
+# 8️⃣ App1 Deployment & Service
+# =========================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app1
+  namespace: __NAMESPACE__
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: app1
+  template:
+    metadata:
+      labels:
+        app: app1
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+        type: virtual-kubelet
+      tolerations:
+        - key: virtual-kubelet.io/provider
+          operator: Exists
+        - key: azure.com/aci
+          effect: NoSchedule
+      imagePullSecrets:
+        - name: acr-pull-secret
+      containers:
+        - name: app1
+          image: __ACR_NAME__.azurecr.io/app1:__IMAGE_TAG__
+          args: ["-text=Hello from App1"]
+          ports:
+            - containerPort: 5678
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app1
+  namespace: __NAMESPACE__
+spec:
+  selector:
+    app: app1
+  ports:
+    - port: 80
+      targetPort: 5678
+  type: ClusterIP
+
+# =========================================================
+# 9️⃣ App2 Deployment & Service
+# =========================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app2
+  namespace: __NAMESPACE__
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: app2
+  template:
+    metadata:
+      labels:
+        app: app2
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+        type: virtual-kubelet
+      tolerations:
+        - key: virtual-kubelet.io/provider
+          operator: Exists
+        - key: azure.com/aci
+          effect: NoSchedule
+      imagePullSecrets:
+        - name: acr-pull-secret
+      containers:
+        - name: app2
+          image: __ACR_NAME__.azurecr.io/app2:__IMAGE_TAG__
+          args: ["-text=Hello from App2"]
+          ports:
+            - containerPort: 5678
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app2
+  namespace: __NAMESPACE__
+spec:
+  selector:
+    app: app2
+  ports:
+    - port: 80
+      targetPort: 5678
+  type: ClusterIP
+
+# =========================================================
+# 10️⃣ Ingress Resource
+# =========================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nginx-stack-ingress
+  namespace: __NAMESPACE__
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - __WEB_HOST__
+        - __APP1_HOST__
+        - __APP2_HOST__
+      secretName: nginx-tls-secret
+  rules:
+    - host: __WEB_HOST__
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nginx-web
+                port:
+                  number: 80
+    - host: __APP1_HOST__
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: app1
+                port:
+                  number: 80
+    - host: __APP2_HOST__
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: app2
+                port:
+                  number: 80
