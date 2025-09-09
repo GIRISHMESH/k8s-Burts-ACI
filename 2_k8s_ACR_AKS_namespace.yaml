@@ -79,6 +79,11 @@ spec:
                   - key: agentpool
                     operator: In
                     values: ["__MYSQL_NODEPOOL__"]
+      tolerations:
+        - key: "db"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
       containers:
         - name: mysql
           image: bitnami/mysql:8.0
@@ -109,9 +114,23 @@ spec:
                 secretKeyRef:
                   name: mysql-secret
                   key: app-password
-          volumeMounts:
-            - name: mysql-data
-              mountPath: /bitnami/mysql
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "1"
+              memory: "2Gi"
+          readinessProbe:
+            exec:
+              command: ["mysqladmin", "ping", "-h", "127.0.0.1"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["mysqladmin", "ping", "-h", "127.0.0.1"]
+            initialDelaySeconds: 60
+            periodSeconds: 15
   volumeClaimTemplates:
     - metadata:
         name: mysql-data
@@ -185,41 +204,65 @@ spec:
 # =========================================================
 # 7️⃣ MySQL Init Job
 # =========================================================
-apiVersion: batch/v1
-kind: Job
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: init-mysql
+  name: nginx-web
   namespace: __NAMESPACE__
 spec:
+  replicas: __NGINX_REPLICAS__
+  selector:
+    matchLabels:
+      app: nginx-web
   template:
+    metadata:
+      labels:
+        app: nginx-web
     spec:
-      restartPolicy: OnFailure
-      containers:
-        - name: mysql
+      nodeSelector:
+        kubernetes.io/os: linux
+        type: virtual-kubelet
+      tolerations:
+        - key: virtual-kubelet.io/provider
+          operator: Exists
+        - key: azure.com/aci
+          effect: NoSchedule
+      initContainers:
+        - name: wait-for-mysql
           image: bitnami/mysql:8.0
-          resources:
-            requests:
-              cpu: "500m"
-              memory: "1Gi"
-            limits:
-              cpu: "1"
-              memory: "2Gi"
           env:
             - name: MYSQL_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: mysql-secret
                   key: root-password
-          command:
-            - sh
-            - -c
-            - |
-              echo "Waiting for MySQL cluster..."
-              /opt/bitnami/scripts/mysql/wait-for-mysql.sh
-              echo "Creating DB..."
-              mysql -h mysql-headless.__NAMESPACE__.svc.cluster.local \
-                    -u root -p"$MYSQL_ROOT_PASSWORD" \
-                    -e "CREATE DATABASE IF NOT EXISTS appdb;"
+          command: ["sh","-c","/opt/bitnami/scripts/mysql/wait-for-mysql.sh"]
+      imagePullSecrets:
+        - name: acr-pull-secret
+      containers:
+        - name: nginx
+          image: __ACR_NAME__.azurecr.io/nginx-web:__IMAGE_TAG__
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 30
+            periodSeconds: 15
 
 # =========================================================
 # 8️⃣ Nginx Deployment, Service & HPA
@@ -678,3 +721,4 @@ spec:
             limits:
               cpu: 200m
               memory: 256Mi
+
