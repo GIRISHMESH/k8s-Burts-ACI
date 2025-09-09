@@ -66,10 +66,10 @@ stages:
       inputs:
         SourceFolder: '$(System.DefaultWorkingDirectory)/kube-manifests'
         Contents: '**'
-        TargetFolder: '$(Build.ArtifactStagingDirectory)/kube-manifests'
+        TargetFolder: '$(Build.ArtifactStagingDirectory)/kube-manifests'####If this  folder not  exists  creating  automatically  "kube-manifests"
         OverWrite: true
 
-    # Publish manifests as pipeline artifact
+    # Publish manifests as pipeline artifact, intermediatery  between  CI  and  CD called  Publish
     - publish: '$(Build.ArtifactStagingDirectory)/kube-manifests'
       artifact: kube-manifests
       displayName: Publish Kube Manifests Artifact
@@ -137,3 +137,4 @@ stages:
               command: apply
               useConfigurationFile: true
               configuration: '$(Pipeline.Workspace)/kube-manifests/*.yaml'
+
