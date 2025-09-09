@@ -100,7 +100,7 @@ stages:
             - download: current
               artifact: kube-manifests
 
-            - task: FileTransform@2
+            - task: FileTransform@2  ####Replace tokens (__NAMESPACE__, __IMAGE_TAG__, etc.)
               displayName: Replace Tokens for DEV
               inputs:
                 folderPath: '$(Pipeline.Workspace)/kube-manifests'
@@ -108,7 +108,7 @@ stages:
                 tokenPattern: '__[A-Z0-9_]+__'
                 replacementValues: |
                   IMAGE_TAG=$(IMAGE_TAG)
-                  NAMESPACE=dev-nginx-stack
+                  NAMESPACE=dev-nginx-stack  #### dev  environment
                   ACR_NAME=$(ACR_NAME)
                   STATIC_IP=$(STATIC_IP)
                   WEB_HOST=$(WEB_HOST)
@@ -160,7 +160,7 @@ stages:
                 tokenPattern: '__[A-Z0-9_]+__'
                 replacementValues: |
                   IMAGE_TAG=$(IMAGE_TAG)
-                  NAMESPACE=qa-nginx-stack
+                  NAMESPACE=qa-nginx-stack  ### QA  environment
                   ACR_NAME=$(ACR_NAME)
                   STATIC_IP=$(STATIC_IP)
                   WEB_HOST=$(WEB_HOST)
@@ -212,7 +212,7 @@ stages:
                 tokenPattern: '__[A-Z0-9_]+__'
                 replacementValues: |
                   IMAGE_TAG=$(IMAGE_TAG)
-                  NAMESPACE=staging-nginx-stack
+                  NAMESPACE=staging-nginx-stack  ### Staging   environment
                   ACR_NAME=$(ACR_NAME)
                   STATIC_IP=$(STATIC_IP)
                   WEB_HOST=$(WEB_HOST)
@@ -234,3 +234,4 @@ stages:
                 command: apply
                 useConfigurationFile: true
                 configuration: '$(Pipeline.Workspace)/kube-manifests/*.yaml'
+
