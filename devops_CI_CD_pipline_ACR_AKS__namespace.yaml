@@ -123,6 +123,9 @@ stages:
                   MYSQL_NODEPOOL=$(MYSQL_NODEPOOL)
                   MYSQL_STORAGECLASS=$(MYSQL_STORAGECLASS)
                   MYSQL_STORAGE=$(MYSQL_STORAGE)
+                  MYSQL_ROOT_PASSWORD=$(MYSQL_ROOT_PASSWORD)
+                  MYSQL_REPL_PASSWORD=$(MYSQL_REPL_PASSWORD)
+                  MYSQL_APP_PASSWORD=$(MYSQL_APP_PASSWORD)
 
             - task: Kubectl@1
               displayName: Deploy to DEV AKS
@@ -178,6 +181,9 @@ stages:
                   MYSQL_NODEPOOL=$(MYSQL_NODEPOOL)
                   MYSQL_STORAGECLASS=$(MYSQL_STORAGECLASS)
                   MYSQL_STORAGE=$(MYSQL_STORAGE)
+                  MYSQL_ROOT_PASSWORD=$(MYSQL_ROOT_PASSWORD)
+                  MYSQL_REPL_PASSWORD=$(MYSQL_REPL_PASSWORD)
+                  MYSQL_APP_PASSWORD=$(MYSQL_APP_PASSWORD)
 
             - task: Kubectl@1
               displayName: Deploy to QA AKS
@@ -233,6 +239,9 @@ stages:
                   MYSQL_NODEPOOL=$(MYSQL_NODEPOOL)
                   MYSQL_STORAGECLASS=$(MYSQL_STORAGECLASS)
                   MYSQL_STORAGE=$(MYSQL_STORAGE)
+                  MYSQL_ROOT_PASSWORD=$(MYSQL_ROOT_PASSWORD)
+                  MYSQL_REPL_PASSWORD=$(MYSQL_REPL_PASSWORD)
+                  MYSQL_APP_PASSWORD=$(MYSQL_APP_PASSWORD)
 
             - task: Kubectl@1
               displayName: Deploy to Staging AKS
@@ -245,6 +254,7 @@ stages:
                 command: apply
                 useConfigurationFile: true
                 configuration: '$(Pipeline.Workspace)/kube-manifests/*.yaml'
+
 
 
 
