@@ -12,7 +12,7 @@ metadata:
   name: ingress-nginx
 
 # =========================================================
-# 2️⃣ Secrets & ConfigMaps
+# 2️⃣ Secrets & ConfigMaps (Tokenized / Key Vault Ready)
 # =========================================================
 apiVersion: v1
 kind: Secret
@@ -170,6 +170,12 @@ spec:
         - podSelector:
             matchLabels:
               app: nginx-web
+        - podSelector:
+            matchLabels:
+              app: app1
+        - podSelector:
+            matchLabels:
+              app: app2
       ports:
         - protocol: TCP
           port: 3306
@@ -177,7 +183,7 @@ spec:
     - Ingress
 
 # =========================================================
-# 7️⃣ Nginx Deployment & Service
+# 7️⃣ Nginx Deployment, Service & HPA
 # =========================================================
 apiVersion: apps/v1
 kind: Deployment
@@ -185,7 +191,7 @@ metadata:
   name: nginx-web
   namespace: __NAMESPACE__
 spec:
-  replicas: 2
+  replicas: __NGINX_REPLICAS__
   selector:
     matchLabels:
       app: nginx-web
@@ -211,10 +217,7 @@ spec:
                 secretKeyRef:
                   name: mysql-secret
                   key: root-password
-          command:
-            - sh
-            - -c
-            - /opt/bitnami/scripts/mysql/wait-for-mysql.sh
+          command: ["sh","-c","/opt/bitnami/scripts/mysql/wait-for-mysql.sh"]
       imagePullSecrets:
         - name: acr-pull-secret
       containers:
@@ -235,9 +238,29 @@ spec:
     - port: 80
       targetPort: 80
   type: ClusterIP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: nginx-web-hpa
+  namespace: __NAMESPACE__
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: nginx-web
+  minReplicas: __NGINX_REPLICAS__
+  maxReplicas: __NGINX_MAX_REPLICAS__
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
 
 # =========================================================
-# 8️⃣ App1 Deployment & Service
+# 8️⃣ App1 Deployment, Service & HPA
 # =========================================================
 apiVersion: apps/v1
 kind: Deployment
@@ -245,7 +268,7 @@ metadata:
   name: app1
   namespace: __NAMESPACE__
 spec:
-  replicas: 2
+  replicas: __APP1_REPLICAS__
   selector:
     matchLabels:
       app: app1
@@ -283,9 +306,29 @@ spec:
     - port: 80
       targetPort: 5678
   type: ClusterIP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: app1-hpa
+  namespace: __NAMESPACE__
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: app1
+  minReplicas: __APP1_REPLICAS__
+  maxReplicas: __APP1_MAX_REPLICAS__
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
 
 # =========================================================
-# 9️⃣ App2 Deployment & Service
+# 9️⃣ App2 Deployment, Service & HPA
 # =========================================================
 apiVersion: apps/v1
 kind: Deployment
@@ -293,7 +336,7 @@ metadata:
   name: app2
   namespace: __NAMESPACE__
 spec:
-  replicas: 2
+  replicas: __APP2_REPLICAS__
   selector:
     matchLabels:
       app: app2
@@ -331,9 +374,29 @@ spec:
     - port: 80
       targetPort: 5678
   type: ClusterIP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: app2-hpa
+  namespace: __NAMESPACE__
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: app2
+  minReplicas: __APP2_REPLICAS__
+  maxReplicas: __APP2_MAX_REPLICAS__
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
 
 # =========================================================
-# 10️⃣ Ingress Resource
+# 🔟 Ingress Resource
 # =========================================================
 apiVersion: networking.k8s.io/v1
 kind: Ingress
