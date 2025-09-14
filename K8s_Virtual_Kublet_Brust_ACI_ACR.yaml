@@ -319,7 +319,7 @@ spec:
   type: ClusterIP
 
 ---
-apiVersion: autoscaling/v2
+apiVersion: autoscaling/v2   ######HPA is already applied here:
 kind: HorizontalPodAutoscaler
 metadata:
   name: nginx-web-hpa
@@ -669,6 +669,7 @@ spec:
             limits:
               cpu: 200m
               memory: 256Mi
+
 
 
 
